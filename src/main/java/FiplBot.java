@@ -40,6 +40,8 @@ public class FiplBot extends TelegramLongPollingBot {
             sendResponse(chatId, "");
         } else if (text.startsWith("/atleta")) {
             handleAtletaCommand(text, chatId);
+        } else if (text.startsWith("/competizione")) {
+            handleCompetizioneCommand(text, chatId);
         }
     }
 
@@ -80,8 +82,6 @@ public class FiplBot extends TelegramLongPollingBot {
                             + "\n" + "Bodyweight (kg): " + bodyweight
                             + "\n" + "Età: " + age + "\n\n";
                 }
-
-
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -89,4 +89,60 @@ public class FiplBot extends TelegramLongPollingBot {
         }
         return res;
     }
+
+    private void handleCompetizioneCommand(String command, Long chatId) {
+        String[] params = command.split("/competizione ");
+        if (params.length == 2) {
+            String competitionName = params[1];
+            String athletesStats = getCompetizioneStats(competitionName);
+            sendResponse(chatId, athletesStats);
+        } else {
+            sendResponse(chatId, "Formatta correttamente il comando: /competizione <nome competizione>");
+        }
+    }
+
+    private String getCompetizioneStats(String meetname) {
+        String res = "";
+        try (Connection conn = DB.getConnection()) {
+            try (PreparedStatement stmt = conn.prepareStatement("SELECT date FROM Meet WHERE meetname = ? limit 1")) {
+                stmt.setString(1, meetname);
+                ResultSet rs = stmt.executeQuery();
+                rs.next();
+                res += "Top 10 atleti nella gara: " + meetname + " svolta il giorno " + rs.getString("date") + "\n\n";
+            }
+
+            String sql = "SELECT P.athlete_name, P.place, P.goodlift " +
+                    "FROM Performance P " +
+                    "JOIN Meet M ON P.meet_id = M.id " +
+                    "WHERE M.meetname = ? " +
+                    "ORDER BY P.goodlift DESC";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, meetname);
+                ResultSet rs = stmt.executeQuery();
+
+
+
+                if (!rs.isBeforeFirst()) {
+                    res += "Nessun atleta trovato per questa competizione.\n";
+                }
+                int cont = 10;
+                while (rs.next() && cont > 0) {
+                    String athleteName = rs.getString("athlete_name");
+                    String place = rs.getString("place");
+                    float goodlift = rs.getFloat("goodlift");
+
+                    res += "Atleta: " + athleteName
+                            + "\n" + "IPF Points (GL): " + goodlift
+                            + "\n" + "Posizione in categoria: " + place
+                            + "\n\n";
+                    cont--;
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            res = "Errore durante il recupero delle statistiche.";
+        }
+        return res;
+    }
+
 }
