@@ -45,7 +45,7 @@ public class FiplBot extends TelegramLongPollingBot {
         } else if (text.startsWith("/gare")) {
             handleGareCommand(text, chatId);
         } else if (text.startsWith("/me")) {
-
+            handleMeCommand(chatId, text);
         }
     }
 
@@ -54,14 +54,13 @@ public class FiplBot extends TelegramLongPollingBot {
         String[] params = command.split("/atleta ");
         if (params.length == 2) {
             String name = params[1];
-            String stats = getAthleteStats(name);
+            String stats = getAtletaStats(name);
             sendResponse(chatId, stats);
         } else {
             sendResponse(chatId, "Formatta correttamente il comando: /atleta <nome cognome>");
         }
     }
-
-    private String getAthleteStats(String name) {
+    private String getAtletaStats(String name) {
         String res = "Gare di " + name + ":\n\n";
         try (Connection conn = DB.getConnection()) {
             String sql = "SELECT total_kg, place, goodlift, bodyweight_kg, age FROM Performance WHERE athlete_name = ?";
@@ -94,6 +93,7 @@ public class FiplBot extends TelegramLongPollingBot {
         return res;
     }
 
+
     private void handleCompetizioneCommand(String command, Long chatId) {
         String[] params = command.split("/competizione ");
         if (params.length == 2) {
@@ -104,7 +104,6 @@ public class FiplBot extends TelegramLongPollingBot {
             sendResponse(chatId, "Formatta correttamente il comando: /competizione <nome competizione>");
         }
     }
-
     private String getCompetizioneStats(String meetname) {
         String res = "";
         try (Connection conn = DB.getConnection()) {
@@ -123,9 +122,6 @@ public class FiplBot extends TelegramLongPollingBot {
             try (PreparedStatement stmt = conn.prepareStatement(sql)) {
                 stmt.setString(1, meetname);
                 ResultSet rs = stmt.executeQuery();
-
-
-
                 if (!rs.isBeforeFirst()) {
                     res += "Nessun atleta trovato per questa competizione.\n";
                 }
@@ -149,8 +145,103 @@ public class FiplBot extends TelegramLongPollingBot {
         return res;
     }
 
+
     private void handleGareCommand(String command, Long chatId) {
         sendResponse(chatId, Scraper.getCompetitions());
     }
 
+
+    private void handleMeCommand(Long chatId, String command) {
+        try {
+            String[] parts = command.split(" ");
+            if (parts.length != 6) {
+                sendResponse(chatId, "Formatta correttamente: /me <sesso(M/F)> <bodyweight> <squat> <bench> <deadlift>");
+                return;
+            }
+            if (!parts[1].equalsIgnoreCase("M") && !parts[1].equalsIgnoreCase("F")) {
+                sendResponse(chatId, "Sesso deve essere 'M' o 'F'.");
+                return;
+            }
+
+            boolean sex = parts[1].equalsIgnoreCase("M");
+            float bodyweight = Float.parseFloat(parts[2]);
+            float squat = Float.parseFloat(parts[3]);
+            float bench = Float.parseFloat(parts[4]);
+            float deadlift = Float.parseFloat(parts[5]);
+            float total = squat + bench + deadlift;
+
+            try (Connection conn = DB.getConnection()) {
+                String percentileQuery = "SELECT COUNT(*) AS weaker, " +
+                        "(SELECT COUNT(*) FROM Performance) AS total " +
+                        "FROM Performance WHERE goodlift < ?";
+                PreparedStatement percentileStmt = conn.prepareStatement(percentileQuery);
+
+
+                double points = getIPFPoints(total, bodyweight, sex);
+                percentileStmt.setFloat(1, (float)points);
+                ResultSet percentileRs = percentileStmt.executeQuery();
+
+                float percentile = 0;
+                if (percentileRs.next()) {
+                    float weaker = percentileRs.getFloat("weaker");
+                    float totalCount = percentileRs.getFloat("total");
+                    percentile = (weaker / totalCount) * 100;
+                }
+                String strongestLift = getStrongestLift(squat, bench, deadlift);
+                String response = String.format(
+                        "Le tue statistiche:\n" +
+                                "- Totale (KG): %.2f kg\n" +
+                                "- Più forte del: %.2f%%" + " degli atleti\n" +
+                                "- IPF Points: %.2f\n" +
+                                "- Alzata più competitiva: %s (%.2f kg)",
+                        total, percentile, points, strongestLift,
+                        strongestLift.equals("Squat") ? squat : strongestLift.equals("Bench") ? bench : deadlift
+                );
+                sendResponse(chatId, response);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            sendResponse(chatId, "An error occurred while processing your performance.");
+        }
+    }
+    public static double getIPFPoints(double total, double bw, boolean gender) {
+        // coefficienti
+        double[] men = {1199.72839, 1025.18162, 0.009210};
+        double[] women = {610.32796, 1045.59282, 0.03048};
+
+        double res = 0.0;
+        if (gender == true) {
+            double denom = men[0] - (men[1] * Math.exp(-1.0 * men[2] * bw));
+            res = (denom == 0) ? 0 : Math.max(0, total * 100 / denom);
+        }
+        else {
+            double denom = women[0] - (women[1] * Math.exp(-1.0 * women[2] * bw));
+            res = (denom == 0) ? 0 : Math.max(0, total * 100 / denom);
+        }
+
+        return res;
+    }
+    private String getStrongestLift(float squat, float bench, float deadlift) {
+        // Proporzioni standard (approssimative)
+        float squatStandard = 4f;
+        float benchStandard = 3f;
+        float deadliftStandard = 5f;
+        float totalProportion = squatStandard + benchStandard + deadliftStandard;
+
+        float expectedSquat = (squatStandard / totalProportion) * (squat + bench + deadlift);
+        float expectedBench = (benchStandard / totalProportion) * (squat + bench + deadlift);
+        float expectedDeadlift = (deadliftStandard / totalProportion) * (squat + bench + deadlift);
+
+        float squatExcess = squat / expectedSquat;
+        float benchExcess = bench / expectedBench;
+        float deadliftExcess = deadlift / expectedDeadlift;
+
+        if (squatExcess >= benchExcess && squatExcess >= deadliftExcess) {
+            return "Squat";
+        } else if (benchExcess >= squatExcess && benchExcess >= deadliftExcess) {
+            return "Bench";
+        } else {
+            return "Deadlift";
+        }
+    }
 }
