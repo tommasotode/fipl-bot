@@ -42,6 +42,10 @@ public class FiplBot extends TelegramLongPollingBot {
             handleAtletaCommand(text, chatId);
         } else if (text.startsWith("/competizione")) {
             handleCompetizioneCommand(text, chatId);
+        } else if (text.startsWith("/gare")) {
+            handleGareCommand(text, chatId);
+        } else if (text.startsWith("/me")) {
+
         }
     }
 
@@ -143,6 +147,10 @@ public class FiplBot extends TelegramLongPollingBot {
             res = "Errore durante il recupero delle statistiche.";
         }
         return res;
+    }
+
+    private void handleGareCommand(String command, Long chatId) {
+        sendResponse(chatId, Scraper.getCompetitions());
     }
 
 }
