@@ -16,7 +16,7 @@ public class FiplBot extends TelegramLongPollingBot {
     }
     @Override
     public String getBotToken() {
-        return "7780803693:AAGL8cfznuzTe2vecWTvZI0VnQDhFQmurfA";
+        return "";
     }
 
     private void sendResponse(Long chatId, String text) {
